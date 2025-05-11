@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8">
+        <style>
+            #main {
+                position: absolute;
+                left: 0px;
+                top: 0px;
+                width: 100vw;
+                height: 100vh;
+                display: flex;
+                align-items: stretch;
+            }
+            #textarea {
+                flex-grow: 1;
+                resize: none;
+                margin: 0px;
+                border: none;
+                outline: none;
+                padding: 5px;
+            }
+            #menu {
+                border-left: 1px dashed;
+                text-align: center;
+                padding: 5px;
+            }
+            #filename {
+                border: 1px solid black;
+                border-radius: 5px;
+                
+                display: inline-block;
+                white-space: nowrap;
+                overflow-x: hidden;
+                max-width: 150px;
+                transition: max-width 0.5s;
+            }
+            #filename:focus, #filename:hover {
+                max-width: 500px;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="main">
+            <textarea id="textarea"></textarea>
+            <div id="menu">
+                <button id="button" onclick="openFile()">Open</button>
+                <br>
+                File name:<br>
+                <span id="filename" contenteditable>text file.txt</span>
+                <br>
+                <button id="button" onclick="saveFile()">Save</button>
+                <hr>
+                <button onclick="undo()">Undo</button>
+                <button onclick="redo()">Redo</button>
+                <hr>
+                <tt id="position"></tt>
+            </div>
+        </div>
+        <script>
+            let undoList = [];
+            let redoList = [];
+            
+            textarea.onkeydown = function(evt) {
+                console.log(evt.key);
+                if (evt.key === "Tab") tabPressed(evt);
+                if (evt.key === "Enter") enterPressed(evt);
+                if (evt.ctrlKey) ctrlPressed(evt);
+                saveState();
+            };
+            
+            textarea.oninput = saveState;
+            
+            textarea.onselectionchange = showPosition;
+            
+            showPosition();
+            saveState();
+            
+            
+            function tabPressed(evt) {
+                evt.preventDefault();
+                
+                const lastNewLine = textarea.value.lastIndexOf("\n", textarea.selectionStart-1);
+                const indentedLines = [lastNewLine+1];
+                for (let i = textarea.selectionStart; i < textarea.selectionEnd-1; i++) {
+                    if (textarea.value[i] === "\n") indentedLines.push(i+1);
+                }
+                
+                let index = 0;
+                let newText = "";
+                let selectionStart = textarea.selectionStart;
+                let selectionEnd   = textarea.selectionEnd  ;
+                const selectionDirection = textarea.selectionDirection;
+                for (let i = 0; i < indentedLines.length; i++) {
+                    newText += textarea.value.slice(index, indentedLines[i]);
+                    index = indentedLines[i];
+                    if (evt.shiftKey) {
+                        for (let j = 0; j < 4; j++) {
+                            if (textarea.value[index] === " ") {
+                                if (textarea.selectionStart > index) selectionStart--;
+                                if (textarea.selectionEnd   > index) selectionEnd  --;
+                                index++;
+                            }
+                        }
+                    } else {
+                        if (textarea.selectionStart >= indentedLines[i]) selectionStart += 4;
+                        if (textarea.selectionEnd   >= indentedLines[i]) selectionEnd   += 4;
+                        newText += "    ";
+                    }
+                }
+                newText += textarea.value.slice(index, textarea.value.length);
+                
+                textarea.value = newText;
+                textarea.selectionStart = selectionStart;
+                textarea.selectionEnd   = selectionEnd  ;
+                textarea.selectionDirection = selectionDirection;
+            }
+            
+            function enterPressed(evt) {
+                evt.preventDefault();
+                
+                let selectionStart = textarea.selectionStart;
+                let selectionEnd   = textarea.selectionEnd  ;
+                const selectionDirection = textarea.selectionDirection;
+                
+                const lineStart = textarea.value.lastIndexOf("\n", selectionStart-1);
+                let spaces = 0;
+                while (textarea.value[lineStart+spaces+1] === " ") spaces++;
+                console.log(spaces);
+                
+                let newText = "";
+                newText += textarea.value.slice(0, selectionStart);
+                newText += "\n";
+                newText += " ".repeat(spaces);
+                newText += textarea.value.slice(selectionEnd, textarea.value.length);
+                
+                selectionStart += 1+spaces;
+                selectionEnd = selectionStart;
+                
+                textarea.value = newText;
+                textarea.selectionStart = selectionStart;
+                textarea.selectionEnd   = selectionEnd  ;
+                textarea.selectionDirection = selectionDirection;
+            }
+            
+            function ctrlPressed(evt) {
+                if (evt.key === "o") {
+                    evt.preventDefault();
+                    openFile();
+                }
+                if (evt.key === "s") {
+                    evt.preventDefault();
+                    saveFile();
+                }
+                if (evt.key === "z") {
+                    evt.preventDefault();
+                    undo();
+                }
+                if (evt.key === "Z") {
+                    evt.preventDefault();
+                    redo();
+                }
+            }
+            
+            function showPosition() {
+                const cursorPos = (textarea.selectionDirection === "backward") ? textarea.selectionStart : textarea.selectionEnd;
+                let line = 1;
+                let column = 1;
+                for (let i = 0; i < cursorPos; i++) {
+                    column++;
+                    if (textarea.value[i] === "\n") {
+                        column = 1;
+                        line++;
+                    }
+                }
+                position.innerHTML = line+":"+column;
+            }
+            
+            function openFile() {
+                const file = document.createElement("input");
+                file.setAttribute("type", "file");
+                file.click();
+                file.oninput = async () => {
+                    if (file.files.length === 0) return;
+                    filename.innerText = file.files[0].name;
+                    textarea.value = await file.files[0].text();
+                    undoList = [];
+                    saveState();
+                };
+            }
+            function saveFile() {
+                const a = document.createElement("a");
+                const blob = new Blob([textarea.value], {type: "text/plain;charset=utf-8;"});
+                const url = URL.createObjectURL(blob);
+                a.setAttribute("href", url);
+                a.setAttribute("download", filename.innerText);
+                a.click();
+            }
+            
+            function undo() {
+                if (undoList.length <= 1) return;
+                redoList.unshift(getState());
+                undoList.shift();
+                setState(undoList[0]);
+            }
+            function redo() {
+                if (redoList.length === 0) return;
+                setState(redoList.shift());
+                undoList.unshift(getState());
+            }
+            
+            function getState() {
+                return {
+                    value: textarea.value,
+                    selectionStart: textarea.selectionStart,
+                    selectionEnd  : textarea.selectionEnd  ,
+                    selectionDirection: textarea.selectionDirection
+                };
+            }
+            function setState(state) {
+                textarea.value = state.value;
+                textarea.selectionStart = state.selectionStart;
+                textarea.selectionEnd   = state.selectionEnd  ;
+                textarea.selectionDirection = state.selectionDirection;
+            }
+            function saveState() {
+                const state = getState();
+                if (undoList.length === 0 || undoList[0].value !== state.value) {
+                    undoList.unshift(state);
+                    redoList = [];
+                }
+            }
+        </script>
+    </body>
+</html>
