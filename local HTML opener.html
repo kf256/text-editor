@@ -5,12 +5,17 @@
     </head>
     <body>
         <input id="file" type="file"></input>
+        <button onclick="loadClipboard()"></button>
         <script>
-            file.oninput = load;
+            file.oninput = loadFile;
             
-            async function load() {
+            async function loadFile() {
                 if (file.files.length === 0) return;
                 document.write(await file.files[0].text());
+            };
+
+            async function loadClipboard() {
+                document.write(await navigator.clipboard.read());
             };
         </script>
     </body>
